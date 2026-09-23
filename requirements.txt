@@ -1,0 +1,9 @@
+langchain>=1.0
+langchain-core
+langchain-groq
+tavily-python
+beautifulsoup4
+requests
+python-dotenv
+streamlit
+rich
