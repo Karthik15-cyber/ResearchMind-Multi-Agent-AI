@@ -1,0 +1,10 @@
+   .env
+   .venv/
+   venv/
+   __pycache__/
+   *.pyc
+   test.py
+   .streamlit/secrets.toml
+   .DS_Store
+   desktop.ini
+   .vscode/
