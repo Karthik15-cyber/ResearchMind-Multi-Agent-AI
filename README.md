@@ -2,7 +2,7 @@
 
 ResearchMind takes any research topic and produces a structured, source-cited report. It chains two tool-calling agents and two LLM chains: one searches the web, one reads the best source in depth, one writes the report, and one critiques it.
 
-**Live demo:** [ADD_STREAMLIT_LINK_HERE]((https://researchmind-multi-agent-ai-bkgbn9w4zjtyg7npxzmvcz.streamlit.app/))
+**Live demo:** [Try ResearchMind on Streamlit](https://researchmind-multi-agent-ai-bkgbn9w4zjtyg7npxzmvcz.streamlit.app/)
 
 
 
