@@ -32,8 +32,9 @@ writer_llm = ChatGroq(
 )
 
 # Separate model for the critic
+# Separate model for the critic
 critic_llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
+    model="openai/gpt-oss-20b",
     api_key=GROQ_API_KEY,
     max_tokens=1024,
     max_retries=5,
