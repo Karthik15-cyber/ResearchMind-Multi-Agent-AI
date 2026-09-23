@@ -1,5 +1,8 @@
-
+import html
 import time
+import traceback
+
+import groq
 import streamlit as st
 from agents import build_reader_agent, build_search_agent, writer_chain, critic_chain
 
@@ -325,8 +328,8 @@ st.markdown("""
     <div class="hero-eyebrow">Multi-Agent AI System</div>
     <h1>Research<span>Mind</span></h1>
     <p class="hero-sub">
-        Four specialized AI agents collaborate — searching, scraping, writing,
-        and critiquing — to deliver a polished research report on any topic.
+        Two AI agents and two LLM chains collaborate — searching, scraping,
+        writing, and critiquing — to deliver a polished research report on any topic.
     </p>
 </div>
 <div class="divider"></div>
@@ -337,14 +340,12 @@ st.markdown("""
 col_left, col_gap, col_right = st.columns([5, 0.4, 4])
 
 with col_left:
-    st.markdown('<div class="input-card">', unsafe_allow_html=True)
     topic = st.text_input(
         "Research Topic",
         placeholder="e.g. Quantum computing breakthroughs in 2025",
         key="topic_input",
     )
     run_btn = st.button("⚡  Run Research Pipeline", use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("""
     <div class="chips-row">
@@ -380,52 +381,69 @@ if st.session_state.running and not st.session_state.done:
     topic_val = st.session_state.topic_val
     results   = {}
 
-    # Step 1 — Search
-    with st.spinner("🔍  Search Agent is working…"):
-        sa = build_search_agent()
-        sr = sa.invoke({"messages": [("user", f"Find recent, reliable and detailed information about: {topic_val}")]})
-        results["search"] = sr["messages"][-1].content
-        st.session_state.results = dict(results)
+    try:
+        # Step 1 — Search
+        with st.spinner("🔍  Search Agent is working…"):
+            sa = build_search_agent()
+            sr = sa.invoke({"messages": [("user", f"Find recent, reliable and detailed information about: {topic_val}")]})
+            results["search"] = sr["messages"][-1].content
+            st.session_state.results = dict(results)
 
-    # Step 2 — Reader
-    with st.spinner("📄  Reader Agent is scraping top resources…"):
-        ra = build_reader_agent()
-        rr = ra.invoke({"messages": [("user",
-            f"""
-            Based on the following search results about '{topic_val}',
-            pick the most relevant URL and scrape it for deeper content.
+        # Step 2 — Reader (send only titles and URLs to save tokens)
+        with st.spinner("📄  Reader Agent is scraping top resources…"):
+            search_links = "\n".join(
+                line for line in results["search"].splitlines()
+                if "TITLE" in line or "URL" in line or "http" in line
+            )
+            if not search_links.strip():
+                search_links = results["search"][:2500]
 
-            Search Results:
-            {results['search'][:2500]}
+            ra = build_reader_agent()
+            rr = ra.invoke({"messages": [("user",
+                f"Based on the following search results about '{topic_val}', "
+                f"pick the most relevant URL and scrape it for deeper content.\n\n"
+                f"Search Results:\n{search_links[:1500]}\n\n"
+                f"IMPORTANT:\n"
+                f"- Identify the URL yourself.\n"
+                f"- Use the scrape_url tool.\n"
+                f"- Do not ask the user for a URL."
+            )]})
+            results["reader"] = rr["messages"][-1].content
+            st.session_state.results = dict(results)
 
-            IMPORTANT:
-            - Identify the URL yourself.
-            - Use the scrape_url tool.
-            - Do not ask the user for a URL.
-            """
-)]})
-        results["reader"] = rr["messages"][-1].content
-        st.session_state.results = dict(results)
+        # Step 3 — Writer
+        with st.spinner("✍️  Writer is drafting the report…"):
+            research_combined = (
+                f"SEARCH RESULTS:\n"
+                f"{results['search'][:2500]}\n\n"
+                f"DETAILED SCRAPED CONTENT:\n"
+                f"{results['reader'][:2000]}"
+            )
+            results["writer"] = writer_chain.invoke({"topic": topic_val, "research": research_combined})
+            st.session_state.results = dict(results)
 
-    # Step 3 — Writer
-    with st.spinner("✍️  Writer is drafting the report…"):
-       research_combined = (
-    f"SEARCH RESULTS:\n"
-    f"{results['search'][:2500]}\n\n"
-    f"DETAILED SCRAPED CONTENT:\n"
-    f"{results['reader'][:2000]}"
-)
-    results["writer"] = writer_chain.invoke({"topic": topic_val, "research": research_combined})
-    st.session_state.results = dict(results)
+        # Step 4 — Critic
+        with st.spinner("🧐  Critic is reviewing the report…"):
+            results["critic"] = critic_chain.invoke({"report": results["writer"]})
+            st.session_state.results = dict(results)
 
-    # Step 4 — Critic
-    with st.spinner("🧐  Critic is reviewing the report…"):
-        results["critic"] = critic_chain.invoke({"report": results["writer"]})
-        st.session_state.results = dict(results)
+        st.session_state.done = True
 
-    st.session_state.running = False
-    st.session_state.done    = True
-    st.rerun()
+    except groq.RateLimitError:
+        traceback.print_exc()
+        st.session_state.results = {}
+        st.error("⏳ The AI service is busy right now (rate limit reached). Please wait a minute and try again.")
+
+    except Exception:
+        traceback.print_exc()
+        st.session_state.results = {}
+        st.error("Something went wrong while running the pipeline. Please try again.")
+
+    finally:
+        st.session_state.running = False
+
+    if st.session_state.done:
+        st.rerun()
 
 
 # ── Results ───────────────────────────────────────────────────────────────────
@@ -435,22 +453,22 @@ if r and st.session_state.done:
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
     st.markdown('<div class="section-heading">Results</div>', unsafe_allow_html=True)
 
-    # Raw agent outputs (collapsed by default)
+    # Raw agent outputs (collapsed by default, HTML-escaped for safety)
     if "search" in r:
         with st.expander("🔍  Search Agent output", expanded=False):
             st.markdown(f'<div class="raw-panel"><div class="panel-label muted">Search Results</div>'
-                        f'<div class="raw-content">{r["search"]}</div></div>', unsafe_allow_html=True)
+                        f'<div class="raw-content">{html.escape(r["search"])}</div></div>', unsafe_allow_html=True)
 
     if "reader" in r:
         with st.expander("📄  Reader Agent output", expanded=False):
             st.markdown(f'<div class="raw-panel"><div class="panel-label muted">Scraped Content</div>'
-                        f'<div class="raw-content">{r["reader"]}</div></div>', unsafe_allow_html=True)
+                        f'<div class="raw-content">{html.escape(r["reader"])}</div></div>', unsafe_allow_html=True)
 
     # Final report
     if "writer" in r:
-        st.markdown('<div class="report-panel"><div class="panel-label orange">📝 &nbsp;Final Research Report</div>', unsafe_allow_html=True)
-        st.markdown(r["writer"])
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown('<div class="panel-label orange">📝 &nbsp;Final Research Report</div>', unsafe_allow_html=True)
+        with st.container(border=True):
+            st.markdown(r["writer"])
         st.download_button(
             label="⬇  Download Report (.md)",
             data=r["writer"],
@@ -460,9 +478,9 @@ if r and st.session_state.done:
 
     # Critic feedback
     if "critic" in r:
-        st.markdown('<div class="feedback-panel"><div class="panel-label green">🧐 &nbsp;Critic Feedback</div>', unsafe_allow_html=True)
-        st.markdown(r["critic"])
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown('<div class="panel-label green">🧐 &nbsp;Critic Feedback</div>', unsafe_allow_html=True)
+        with st.container(border=True):
+            st.markdown(r["critic"])
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("""
